@@ -1,0 +1,20 @@
+# 备选：在 NAS 上从源码构建（需要 NAS 能上外网，见 构建版说明.md）
+services:
+  app:
+    build: .
+    container_name: peer-review
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3100}:3000"
+    environment:
+      TZ: Asia/Shanghai
+      PORT: "3000"
+      DATA_DIR: /data
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      COOKIE_SECURE: "false"
+      APP_SECRET: ${APP_SECRET:-}
+    volumes:
+      - peerdata:/data
+volumes:
+  peerdata:

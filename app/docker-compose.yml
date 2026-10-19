@@ -1,0 +1,32 @@
+# 课堂互评 / 投票评分系统
+#
+# 起服务：
+#   1. cp .env.example .env   然后改密码
+#   2. docker compose up -d --build
+#   3. 浏览器打开 http://<本机局域网IP>:${PORT}
+#
+# 数据全部落在命名卷 peerdata 里（不要改成 SMB/NFS 共享目录，SQLite 的 WAL 在
+# 网络文件系统上会直接打不开库）。备份：docker run --rm -v peerdata:/d -v $PWD:/b alpine tar czf /b/backup.tgz -C /d .
+
+services:
+  app:
+    build: .
+    container_name: peer-review
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      TZ: Asia/Shanghai
+      PORT: "3000"
+      DATA_DIR: /data
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      # 局域网走 HTTP 时必须为 false，否则登录后 cookie 不发送（表现为"登录没反应"）
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # 用于加密 AI Key。设置了就用它；不设就用数据卷里的 .secret（安全性差一档）
+      APP_SECRET: ${APP_SECRET:-}
+    volumes:
+      - peerdata:/data
+
+volumes:
+  peerdata:

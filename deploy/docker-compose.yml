@@ -1,0 +1,26 @@
+# 飞牛 NAS 部署版（不构建，直接用现成镜像）
+
+services:
+  app:
+    image: peer-review:latest
+    container_name: peer-review
+    restart: unless-stopped
+    ports:
+      # 宿主机端口 → 容器 3000。NAS 的 3000 已被别的服务占用，这里默认用 3100
+      - "${PORT:-3100}:3000"
+    environment:
+      TZ: Asia/Shanghai
+      PORT: "3000"
+      DATA_DIR: /data
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      # 局域网 HTTP 必须 false
+      COOKIE_SECURE: "false"
+      # 加密 AI Key 的主密钥，见 .env
+      APP_SECRET: ${APP_SECRET:-}
+    volumes:
+      # 用命名卷，别挂到 SMB/NFS 共享目录上（SQLite 的 WAL 在共享盘上会打不开）
+      - peerdata:/data
+
+volumes:
+  peerdata:
