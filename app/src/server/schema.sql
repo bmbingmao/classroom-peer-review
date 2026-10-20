@@ -230,3 +230,15 @@ CREATE TABLE IF NOT EXISTS ai_calls (
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_act ON ai_calls(activity_id, created_at);
+
+-- 评分项模板：老师存下来复用，避免每次重复录入
+CREATE TABLE IF NOT EXISTS rubric_templates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  teacher_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT    NOT NULL,
+  items       TEXT    NOT NULL,
+  use_count   INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  UNIQUE (teacher_id, name)
+);

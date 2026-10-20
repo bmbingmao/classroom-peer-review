@@ -50,6 +50,7 @@ function client() {
     post: (p, b) => req('POST', p, b),
     put: (p, b) => req('PUT', p, b),
     getRaw: (p) => req('GET', p, undefined, true),
+    delete: (p) => req('DELETE', p),
   };
 }
 
@@ -423,6 +424,42 @@ console.log('\n[7] 热词');
   const words = (await teacher.get(`/api/teacher/activities/${scoreAct.id}/words`)).data.words;
   ok('返回热词数组', Array.isArray(words), words);
   ok('热词带频次且降序', words.length === 0 || words.every((w, i) => i === 0 || words[i - 1].count >= w.count), words.slice(0, 5));
+}
+
+
+/* ================= 8. 评分项模板 ================= */
+
+console.log('\n[8] 评分项模板 / 复用');
+{
+  const r0 = await teacher.get('/api/teacher/rubrics');
+  eq('模板接口可用', r0.status, 200);
+  ok('最近活动里能带出评分项', r0.data.recent.length >= 1, r0.data.recent.length);
+
+  const save = await teacher.post('/api/teacher/rubrics', {
+    name: '冒烟模板',
+    items: [
+      { name: '完成度', min: 1, max: 10, weight: 60 },
+      { name: '美观度', min: 1, max: 10, weight: 40 },
+    ],
+  });
+  eq('存为模板', save.status, 200);
+
+  const again = await teacher.post('/api/teacher/rubrics', {
+    name: '冒烟模板',
+    items: [{ name: '只改了一项', min: 0, max: 5, weight: 1 }],
+  });
+  ok('同名模板是覆盖而不是新增', !!again.data.updated, again.data);
+
+  const list = (await teacher.get('/api/teacher/rubrics')).data.templates;
+  const tpl = list.find((t) => t.name === '冒烟模板');
+  ok('列表里只有一条「冒烟模板」', list.filter((t) => t.name === '冒烟模板').length === 1);
+  eq('覆盖后是新的一套', tpl.items.length, 1);
+
+  eq('记录使用次数', (await teacher.post(`/api/teacher/rubrics/${tpl.id}/use`)).status, 200);
+  eq('空评分项被拒', (await teacher.post('/api/teacher/rubrics', { name: '坏模板', items: [] })).status, 400);
+  eq('删除模板', (await teacher.delete(`/api/teacher/rubrics/${tpl.id}`)).status, 200);
+  const after = (await teacher.get('/api/teacher/rubrics')).data.templates;
+  ok('删除后列表里没有', !after.some((t) => t.id === tpl.id));
 }
 
 console.log('\n' + '='.repeat(48));

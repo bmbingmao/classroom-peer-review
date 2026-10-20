@@ -188,6 +188,10 @@ let groupId = 0;
 
   const members = await teacher.get(`/api/teacher/groups/${groupId}/members`);
   eq('组内 5 人', members.data.members.length, 5);
+
+  const withGroups = (await teacher.get('/api/teacher/students')).data.students;
+  ok('学生接口带出所属组（界面按组分组用）', withGroups.every((s) => Array.isArray(s.groups)), withGroups[0]);
+  ok('组名对得上', withGroups.some((s) => s.groups.some((g) => g.name === '计算机1班')));
 }
 
 /* ================= 4. 评分活动 ================= */

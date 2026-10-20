@@ -168,10 +168,10 @@ router.post('/groups/:id/members/:studentId/reset-password', (req: any, res) => 
   res.json({ ok: true, hint: '已重置为学号，该学生下次登录需重新改密' });
 });
 
-/** 我的全部学生 */
+/** 我的全部学生（带所属组，界面按组分组显示） */
 router.get('/students', (req: any, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  const rows = all(
+  const rows = all<any>(
     `SELECT u.id, u.username, u.display_name, u.must_change_pwd, u.points_cached
        FROM teacher_students t JOIN users u ON u.id = t.student_id
       WHERE t.teacher_id = ? AND (? = '' OR u.username LIKE ? OR u.display_name LIKE ?)
@@ -181,7 +181,24 @@ router.get('/students', (req: any, res) => {
     `%${q}%`,
     `%${q}%`,
   );
-  res.json({ students: rows });
+
+  // 归属组：一次查出来，前端做分组 / 批量添加
+  const membership = all<any>(
+    `SELECT gm.student_id, g.id, g.name
+       FROM group_members gm JOIN groups g ON g.id = gm.group_id
+      WHERE g.teacher_id = ?
+      ORDER BY g.id`,
+    req.user.id,
+  );
+  const byStudent = new Map<number, { id: number; name: string }[]>();
+  for (const m of membership) {
+    if (!byStudent.has(m.student_id)) byStudent.set(m.student_id, []);
+    byStudent.get(m.student_id)!.push({ id: m.id, name: m.name });
+  }
+
+  res.json({
+    students: rows.map((u) => ({ ...u, groups: byStudent.get(u.id) ?? [] })),
+  });
 });
 
 /* ---------------- 文件夹（课程归档） ---------------- */

@@ -30,6 +30,11 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
   ]);
   const [targets, setTargets] = useState<Target[]>([{ anonLabel: '作品A', studentId: '', media: [] }]);
 
+  // 评分项模板 / 上次用的
+  const [rubrics, setRubrics] = useState<{ templates: any[]; recent: any[] }>({ templates: [], recent: [] });
+  const [rubricPick, setRubricPick] = useState('');
+  const [bulkGroup, setBulkGroup] = useState('');
+
   useEffect(() => {
     get('/api/teacher/groups')
       .then((r) => {
@@ -40,7 +45,52 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
     get('/api/teacher/students')
       .then((r) => setStudents(r.students))
       .catch(() => {});
+
+    if (!isVote) {
+      get('/api/teacher/rubrics')
+        .then((r) => setRubrics(r))
+        .catch(() => {});
+      // 上次用过的那套评分项，直接带出来，省得每次重敲
+      try {
+        const last = localStorage.getItem('lastRubric');
+        if (last) {
+          const parsed = JSON.parse(last);
+          if (Array.isArray(parsed) && parsed.length && parsed.every((x) => x?.name)) setItems(parsed);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
+
+  function applyRubric(value: string) {
+    setRubricPick(value);
+    if (!value) return;
+    const [kind, id] = value.split(':');
+    const src =
+      kind === 't'
+        ? rubrics.templates.find((t) => String(t.id) === id)?.items
+        : rubrics.recent.find((r) => String(r.activityId) === id)?.items;
+    if (Array.isArray(src) && src.length) {
+      setItems(src.map((i: any) => ({ name: i.name, min: i.min ?? i.min_score ?? 1, max: i.max ?? i.max_score ?? 10, weight: i.weight ?? 1 })));
+      if (kind === 't') post(`/api/teacher/rubrics/${id}/use`).catch(() => {});
+      toast('已套用');
+    }
+  }
+
+  async function saveTemplate() {
+    if (!items.length) return toast('先填几个评分项');
+    const name = prompt('给这套评分项起个名字（同名会覆盖）', title.trim() || '常用评分项');
+    if (!name?.trim()) return;
+    try {
+      await post('/api/teacher/rubrics', { name: name.trim(), items });
+      const r = await get('/api/teacher/rubrics');
+      setRubrics(r);
+      toast('已存为模板');
+    } catch (e) {
+      reportError(e);
+    }
+  }
 
   function toggleGroup(id: number) {
     setGroupIdSet((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -93,6 +143,7 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
     setBusy(true);
     try {
       const r = await post('/api/teacher/activities', payload);
+      if (!isVote) localStorage.setItem('lastRubric', JSON.stringify(items));
       toast('已发起');
       nav(`#/t/result/${r.id}`);
     } catch (e: any) {
@@ -100,6 +151,82 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
     } finally {
       setBusy(false);
     }
+  }
+
+  /** 作品A..Z，超过 26 个就用 编号27 */
+  const anonLabelFor = (i: number) =>
+    i < 26 ? `作品${String.fromCharCode(65 + i)}` : `编号${i + 1}`;
+
+  /** 现有编号用到第几个了，接着往下编 */
+  function nextAnonIndex(list: { anonLabel: string }[]): number {
+    let max = -1;
+    for (const t of list) {
+      const m = /^作品([A-Z])$/.exec(t.anonLabel ?? '');
+      if (m) max = Math.max(max, m[1].charCodeAt(0) - 65);
+      const n = /^编号(\d+)$/.exec(t.anonLabel ?? '');
+      if (n) max = Math.max(max, Number(n[1]) - 1);
+    }
+    return max + 1;
+  }
+
+  /** 学生下拉：按学生组分组显示 */
+  function StudentOptions() {
+    const ungrouped = students.filter((s) => !s.groups || s.groups.length === 0);
+    return (
+      <>
+        <option value="">不关联</option>
+        {groups.map((g) => {
+          const members = students.filter((s) => (s.groups ?? []).some((x: any) => x.id === g.id));
+          if (!members.length) return null;
+          return (
+            <optgroup key={g.id} label={`${g.name}（${members.length} 人）`}>
+              {members.map((s) => (
+                <option key={`${g.id}-${s.id}`} value={s.id}>
+                  {s.username} {s.display_name}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+        {ungrouped.length > 0 && (
+          <optgroup label="未分组">
+            {ungrouped.map((s) => (
+              <option key={`ng-${s.id}`} value={s.id}>
+                {s.username} {s.display_name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </>
+    );
+  }
+
+  /** 把一个学生组的成员一次性加成被评对象 */
+  function addGroupTargets() {
+    if (!bulkGroup) return;
+    const gid = Number(bulkGroup);
+    const g = groups.find((x) => x.id === gid);
+    const members = students.filter((s) => (s.groups ?? []).some((x: any) => x.id === gid));
+    if (!members.length) return toast('这个组里还没有学生');
+
+    const existing = new Set(targets.map((t) => t.studentId).filter(Boolean));
+    const fresh = members.filter((s) => !existing.has(String(s.id)));
+    if (!fresh.length) return toast('这个组的学生都已经加进来了');
+
+    // 表单还是空的时候（只有没关联学生的占位行），直接把它们换掉，避免出现重复编号
+    const realOnes = targets.filter((t: any) => t.studentId || (t.media?.length ?? 0) > 0);
+    const base = realOnes.length ? targets : [];
+    const startIdx = base.length ? nextAnonIndex(base) : 0;
+    const added = fresh.map((s, i) => ({
+      anonLabel: anonLabelFor(startIdx + i),
+      studentId: String(s.id),
+      media: [],
+    }));
+    setTargets([...base, ...added]);
+    // 被评对象在这组，评委一般也来自这组，顺手勾上
+    if (g && !groupIdSet.includes(g.id)) setGroupIdSet([...groupIdSet, g.id]);
+    setBulkGroup('');
+    toast(`已添加 ${added.length} 个被评对象${g && !groupIdSet.includes(g.id) ? '，并把「' + g.name + '」设为参与组' : ''}`);
   }
 
   async function upload(targetIndex: number, file: File | undefined) {
@@ -239,6 +366,37 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
             <div className="hint" style={{ marginTop: 6 }}>
               权重是相对值，系统按 Σ(均分×权重)/Σ权重 算总分；权重全填 0 会自动按等权。
             </div>
+
+            <div className="row" style={{ marginTop: 10 }}>
+              <select
+                value={rubricPick}
+                onChange={(e) => applyRubric(e.target.value)}
+                style={{ flex: 1, minWidth: 200, padding: '8px 10px', borderRadius: 10, border: '1px solid var(--line)' }}
+              >
+                <option value="">套用模板 / 上次的评分项…</option>
+                {rubrics.templates.length > 0 && (
+                  <optgroup label="我的模板">
+                    {rubrics.templates.map((t: any) => (
+                      <option key={t.id} value={`t:${t.id}`}>
+                        {t.name}（{t.items.length} 项）
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {rubrics.recent.length > 0 && (
+                  <optgroup label="最近用过">
+                    {rubrics.recent.map((r: any) => (
+                      <option key={r.activityId} value={`a:${r.activityId}`}>
+                        {r.title}（{r.items.length} 项）
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <button className="btn btn-sm" onClick={saveTemplate}>
+                存为模板
+              </button>
+            </div>
             {items.map((it, i) => (
               <div key={i} className="row" style={{ marginTop: 10, alignItems: 'flex-end' }}>
                 <div style={{ flex: 2, minWidth: 140 }}>
@@ -293,7 +451,7 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
                 className="btn btn-sm"
                 disabled={targets.length >= 50}
                 onClick={() =>
-                  setTargets([...targets, { anonLabel: `作品${String.fromCharCode(65 + targets.length)}`, studentId: '', media: [] }])
+                  setTargets([...targets, { anonLabel: anonLabelFor(targets.length), studentId: '', media: [] }])
                 }
               >
                 + 加一个
@@ -301,6 +459,24 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
             </div>
             <div className="hint" style={{ marginTop: 6 }}>
               学生只看得到「作品A」这样的匿名编号，真实对应关系只有你能看到。
+            </div>
+
+            <div className="row" style={{ marginTop: 10 }}>
+              <select
+                value={bulkGroup}
+                onChange={(e) => setBulkGroup(e.target.value)}
+                style={{ flex: 1, minWidth: 180, padding: '8px 10px', borderRadius: 10, border: '1px solid var(--line)' }}
+              >
+                <option value="">按学生组批量添加被评对象…</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}（{students.filter((s) => (s.groups ?? []).some((x: any) => x.id === g.id)).length} 人）
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-sm" disabled={!bulkGroup} onClick={addGroupTargets}>
+                批量添加
+              </button>
             </div>
             {targets.map((t, i) => (
               <div key={i} style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 12 }}>
@@ -321,12 +497,7 @@ export default function TeacherNew({ type, nav }: { type: 'vote' | 'score'; nav:
                       onChange={(e) => setTargets(targets.map((x, j) => (j === i ? { ...x, studentId: e.target.value } : x)))}
                       style={{ width: '100%', padding: '9px 10px', border: '1px solid var(--line)', borderRadius: 10 }}
                     >
-                      <option value="">不关联</option>
-                      {students.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.username} {s.display_name}
-                        </option>
-                      ))}
+                      <StudentOptions />
                     </select>
                   </div>
                   <div>

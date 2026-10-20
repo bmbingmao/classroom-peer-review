@@ -17,6 +17,7 @@ import exportRoutes from './routes/export.ts';
 import { studentComments, teacherComments } from './routes/comments.ts';
 import { teacherPoints, studentPoints } from './routes/points.ts';
 import { adminAi, teacherAi } from './routes/aiconfig.ts';
+import rubricRoutes from './routes/rubrics.ts';
 import { resumePending } from './ai-worker.ts';
 
 const HERE = import.meta.dirname;
@@ -57,6 +58,7 @@ app.use('/api/teacher', requireRole('teacher'), teacherComments);
 app.use('/api/teacher', requireRole('teacher'), teacherPoints);
 app.use('/api/teacher', requireRole('teacher'), exportRoutes);
 app.use('/api/teacher', requireRole('teacher'), teacherAi);
+app.use('/api/teacher', requireRole('teacher'), rubricRoutes);
 app.use('/api/student', requireRole('student'), studentComments);
 app.use('/api/student', requireRole('student'), studentPoints);
 app.use('/api/admin', requireRole('admin'), adminAi);
