@@ -3,6 +3,8 @@ import { get, post, setUnauthorizedHandler } from './api';
 import Login from './pages/Login';
 import ChangePwd from './pages/ChangePwd';
 import Admin from './pages/Admin';
+import AdminStudents from './pages/AdminStudents';
+import Account from './pages/Account';
 import TeacherActivities from './pages/TeacherActivities';
 import TeacherGroups from './pages/TeacherGroups';
 import TeacherNew from './pages/TeacherNew';
@@ -123,8 +125,11 @@ export default function App() {
           <a href="#/a" className={hash === '#/a' || hash === '' ? 'active' : ''}>
             管理后台
           </a>
-          <a href="#/change-pwd" className={hash === '#/change-pwd' ? 'active' : ''}>
-            改密码
+          <a href="#/a/students" className={hash.startsWith('#/a/students') ? 'active' : ''}>
+            学生信息
+          </a>
+          <a href="#/a/account" className={hash.startsWith('#/a/account') ? 'active' : ''}>
+            账号设置
           </a>
         </div>
       )}
@@ -156,18 +161,22 @@ export default function App() {
         </div>
       )}
 
-      <Routes hash={hash} role={role} nav={nav} />
+      <Routes hash={hash} role={role} nav={nav} user={user} refresh={refresh} />
     </>
   );
 }
 
-function Routes({ hash, role, nav }: { hash: string; role: string; nav: (p: string) => void }) {
+function Routes({ hash, role, nav, user, refresh }: { hash: string; role: string; nav: (p: string) => void; user: any; refresh: () => void }) {
   const clean = hash.replace(/^#/, '');
   const parts = clean.split('/').filter(Boolean);
 
   if (clean === '/change-pwd') return <ChangePwd onDone={() => nav(homeFor(role))} />;
 
-  if (role === 'admin') return <Admin />;
+  if (role === 'admin') {
+    if (parts[1] === 'students') return <AdminStudents />;
+    if (parts[1] === 'account') return <Account user={user} onChanged={refresh} />;
+    return <Admin />;
+  }
 
   if (role === 'teacher') {
     if (parts[0] !== 't') return <TeacherActivities nav={nav} />;

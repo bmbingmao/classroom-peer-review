@@ -65,6 +65,27 @@ router.post('/logout', (req: any, res) => {
   res.json({ ok: true });
 });
 
+
+/** 改用户名（需要密码确认） */
+router.post('/change-username', (req: any, res) => {
+  const u = req.user;
+  if (!u) throw unauthorized();
+  const password = str(req.body?.password, '密码', 128);
+  const newUsername = str(req.body?.newUsername, '新账号', 64).trim();
+
+  if (!/^[0-9A-Za-z_.-]{3,32}$/.test(newUsername)) {
+    throw bad('账号只能是 3-32 位字母、数字、下划线、点或横线');
+  }
+  const row = one<any>('SELECT password_hash FROM users WHERE id = ?', u.id);
+  if (!row || !verifyPwd(password, row.password_hash)) throw bad('密码不正确');
+
+  const dup = one<any>('SELECT id FROM users WHERE username = ? AND id <> ?', newUsername, u.id);
+  if (dup) throw bad(`账号 ${newUsername} 已被占用`);
+
+  run('UPDATE users SET username = ? WHERE id = ?', newUsername, u.id);
+  res.json({ ok: true, username: newUsername });
+});
+
 router.post('/change-password', (req: any, res) => {
   const u = req.user;
   if (!u) throw unauthorized();

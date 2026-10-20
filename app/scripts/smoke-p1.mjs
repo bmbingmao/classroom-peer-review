@@ -462,6 +462,48 @@ console.log('\n[8] 评分项模板 / 复用');
   ok('删除后列表里没有', !after.some((t) => t.id === tpl.id));
 }
 
+
+/* ================= 9. 管理员：学生总览 / 改用户名 / 重置密码 ================= */
+
+console.log('\n[9] 管理员功能');
+{
+  const admin = client();
+  eq('超管登录', (await admin.post('/api/auth/login', { username: 'admin', password: 'admin6666' })).status, 200);
+
+  const list = await admin.get('/api/admin/students');
+  eq('学生总览可用', list.status, 200);
+  ok('学生列表非空', list.data.students.length >= 8, list.data.students.length);
+  const first = list.data.students[0];
+  ok('带出所属组和教师', 'groups_text' in first && 'teachers_text' in first, first);
+  ok('能按姓名搜索', (await admin.get('/api/admin/students?q=张三')).data.students.length === 1);
+
+  // 改用户名：建一个临时教师走一遍完整流程
+  const t = await admin.post('/api/admin/teachers', { username: 'tmpusr', display_name: '临时老师', password: 'tmp123456' });
+  eq('建临时教师', t.status, 200);
+  const tmp = client();
+  eq('用原账号登录', (await tmp.post('/api/auth/login', { username: 'tmpusr', password: 'tmp123456' })).status, 200);
+  const badPwd = await tmp.post('/api/auth/change-username', { password: 'wrong', newUsername: 'tmpusr2' });
+  eq('改用户名要密码确认', badPwd.status, 400);
+  const dup = await tmp.post('/api/auth/change-username', { password: 'tmp123456', newUsername: 'teacher1' });
+  eq('不能改成已占用的账号', dup.status, 400);
+  const badName = await tmp.post('/api/auth/change-username', { password: 'tmp123456', newUsername: 'a b' });
+  eq('非法账号被拒', badName.status, 400);
+  const okName = await tmp.post('/api/auth/change-username', { password: 'tmp123456', newUsername: 'tmpusr2' });
+  eq('改用户名成功', okName.status, 200);
+  ok('旧账号登不上了', (await client().post('/api/auth/login', { username: 'tmpusr', password: 'tmp123456' })).status === 401);
+  eq('新账号能登', (await client().post('/api/auth/login', { username: 'tmpusr2', password: 'tmp123456' })).status, 200);
+
+  // 重置学生密码（2023008 没被其它用例占用）
+  const sid = list.data.students.find((s) => s.username === '2023008')?.id;
+  ok('找得到学生 2023008', !!sid);
+  eq('重置学生密码', (await admin.post(`/api/admin/students/${sid}/reset-password`, {})).status, 200);
+  const relogin = await client().post('/api/auth/login', { username: '2023008', password: '2023008' });
+  eq('重置后能用学号登录', relogin.status, 200);
+  ok('并要求改密码', !!relogin.data.must_change_pwd, relogin.data);
+
+  eq('学生接口不对外', (await teacher.get('/api/admin/students')).status, 403);
+}
+
 console.log('\n' + '='.repeat(48));
 if (failures.length === 0) {
   console.log(`P1 冒烟全部通过：${passed} 项`);

@@ -59,6 +59,40 @@ router.post('/teachers/:id/reset-password', (req: any, res) => {
   res.json({ ok: true });
 });
 
+
+/** 全站学生总览（管理员视角：跨所有教师） */
+router.get('/students', (req: any, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const rows = all<any>(
+    `SELECT u.id, u.username, u.display_name, u.points_cached, u.status, u.must_change_pwd, u.created_at,
+            (SELECT GROUP_CONCAT(g.name, '、')
+               FROM group_members gm JOIN groups g ON g.id = gm.group_id
+              WHERE gm.student_id = u.id) AS groups_text,
+            (SELECT GROUP_CONCAT(t.display_name, '、')
+               FROM teacher_students ts JOIN users t ON t.id = ts.teacher_id
+              WHERE ts.student_id = u.id) AS teachers_text
+       FROM users u
+      WHERE u.role = 'student'
+        AND (? = '' OR u.username LIKE ? OR u.display_name LIKE ?)
+      ORDER BY u.username
+      LIMIT 500`,
+    q,
+    `%${q}%`,
+    `%${q}%`,
+  );
+  res.json({ students: rows });
+});
+
+/** 把某个学生的密码重置成学号（首次登录再改） */
+router.post('/students/:id/reset-password', (req: any, res) => {
+  const id = int(req.params.id, 'id');
+  const u = one<any>("SELECT id, username FROM users WHERE id = ? AND role = 'student'", id);
+  if (!u) throw notFound('学生不存在');
+  run('UPDATE users SET password_hash = ?, must_change_pwd = 1 WHERE id = ?', hashPwd(u.username), id);
+  run('DELETE FROM sessions WHERE user_id = ?', id);
+  res.json({ ok: true, username: u.username });
+});
+
 router.get('/status', (_req: any, res) => {
   const c = (sql: string) => (one<{ c: number }>(sql)?.c ?? 0);
   res.json({
