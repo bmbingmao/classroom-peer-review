@@ -118,6 +118,17 @@ export default function App() {
         </button>
       </div>
 
+      {role === 'admin' && (
+        <div className="nav">
+          <a href="#/a" className={hash === '#/a' || hash === '' ? 'active' : ''}>
+            管理后台
+          </a>
+          <a href="#/change-pwd" className={hash === '#/change-pwd' ? 'active' : ''}>
+            改密码
+          </a>
+        </div>
+      )}
+
       {role === 'student' && (
         <div className="nav">
           <a href="#/s" className={hash === '#/s' || hash === '' || hash.startsWith('#/s/') && !hash.startsWith('#/s/points') ? 'active' : ''}>
