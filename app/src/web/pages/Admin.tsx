@@ -7,6 +7,9 @@ export default function Admin() {
   const [aiBase, setAiBase] = useState('');
   const [aiModel, setAiModel] = useState('');
   const [aiKey, setAiKey] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [showDefaultPrompt, setShowDefaultPrompt] = useState(false);
+  const [defaultPromptText, setDefaultPromptText] = useState('');
   const [aiPreset, setAiPreset] = useState('custom');
   const [aiTesting, setAiTesting] = useState(false);
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -26,6 +29,8 @@ export default function Admin() {
       setAi(a.ai);
       setAiBase(a.ai?.api_base ?? '');
       setAiModel(a.ai?.model ?? '');
+      setAiPrompt(a.ai?.prompt ?? '');
+      setDefaultPromptText(a.defaultPrompt ?? '');
       setAiPreset(matchPreset(a.ai?.api_base ?? '', a.ai?.model ?? '')?.key ?? 'custom');
     } catch (e) {
       reportError(e);
@@ -228,12 +233,58 @@ export default function Admin() {
           <div className="hint">加密存储（AES-256-GCM），接口返回永远脱敏。</div>
         </div>
 
+        <div className="field">
+          <label>全局审核提示词（教师没自定义时用这个）</label>
+          <textarea
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            rows={7}
+            placeholder="留空 = 使用系统内置默认提示词"
+            style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.6 }}
+          />
+          <div className="hint">
+            教师端可以自己改提示词，以教师自己的为准；教师没填才用这里的；这里也空着就用系统内置。
+            <a
+              href="#"
+              style={{ marginLeft: 8 }}
+              onClick={(e) => {
+                e.preventDefault();
+                setShowDefaultPrompt((v) => !v);
+              }}
+            >
+              {showDefaultPrompt ? '收起内置默认' : '看看内置默认'}
+            </a>
+          </div>
+          {showDefaultPrompt && (
+            <pre
+              style={{
+                whiteSpace: 'pre-wrap',
+                background: 'var(--bg-soft, #f6f8fb)',
+                border: '1px solid var(--line)',
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 12,
+                lineHeight: 1.6,
+                maxHeight: 260,
+                overflow: 'auto',
+              }}
+            >
+              {defaultPromptText}
+            </pre>
+          )}
+        </div>
+
         <div className="row">
           <button
             className="btn btn-primary btn-sm"
             onClick={async () => {
               try {
-                await put('/api/admin/ai-config', { api_base: aiBase.trim(), model: aiModel.trim(), api_key: aiKey.trim() });
+                await put('/api/admin/ai-config', {
+                  api_base: aiBase.trim(),
+                  model: aiModel.trim(),
+                  api_key: aiKey.trim(),
+                  prompt: aiPrompt,
+                });
                 setAiKey('');
                 toast('已保存');
                 load();

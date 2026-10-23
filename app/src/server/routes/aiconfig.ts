@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { one, run } from '../db.ts';
 import { int } from '../util.ts';
 import { decryptSecret, encryptSecret, maskKey } from '../crypto.ts';
-import { moderate, resolveAiConfig } from '../ai.ts';
+import { DEFAULT_PROMPT, moderate, resolveAiConfig } from '../ai.ts';
 
 export const teacherAi = Router();
 export const adminAi = Router();
@@ -14,11 +14,20 @@ teacherAi.get('/ai-config', (req: any, res) => {
   const effective = resolveAiConfig(req.user.id);
   res.json({
     own: own
-      ? { api_base: own.api_base, model: own.model, keyMask: maskKey(decryptSecret(own.api_key_enc)), updated_at: own.updated_at }
+      ? {
+          api_base: own.api_base,
+          model: own.model,
+          keyMask: maskKey(decryptSecret(own.api_key_enc)),
+          prompt: own.prompt ?? '',
+          updated_at: own.updated_at,
+        }
       : null,
     global: global_
-      ? { api_base: global_.api_base, model: global_.model, configured: true }
+      ? { api_base: global_.api_base, model: global_.model, prompt: global_.prompt ?? '', configured: true }
       : null,
+    /** 当前实际生效的提示词（教师自己 > 超管 > 内置） */
+    effectivePrompt: effective?.prompt ?? DEFAULT_PROMPT,
+    defaultPrompt: DEFAULT_PROMPT,
     effective: !!effective,
   });
 });
@@ -27,8 +36,25 @@ teacherAi.put('/ai-config', (req: any, res) => {
   const api_base = String(req.body?.api_base ?? '').trim();
   const model = String(req.body?.model ?? '').trim();
   const api_key = String(req.body?.api_key ?? '').trim();
+  const prompt = String(req.body?.prompt ?? '').slice(0, 4000);
 
+  // 只填提示词（接口沿用超管兜底）也允许保存
   if (!api_base && !model && !api_key) {
+    if (prompt.trim()) {
+      const now = Date.now();
+      const cur = one<any>('SELECT * FROM ai_config WHERE teacher_id = ?', req.user.id);
+      run(
+        `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, prompt, updated_at) VALUES(?,?,?,?,?,?)
+         ON CONFLICT(teacher_id) DO UPDATE SET prompt = excluded.prompt, updated_at = excluded.updated_at`,
+        req.user.id,
+        cur?.api_base ?? '',
+        cur?.api_key_enc ?? '',
+        cur?.model ?? '',
+        prompt,
+        now,
+      );
+      return res.json({ ok: true, promptOnly: true });
+    }
     run('DELETE FROM ai_config WHERE teacher_id = ?', req.user.id);
     return res.json({ ok: true, cleared: true });
   }
@@ -41,13 +67,14 @@ teacherAi.put('/ai-config', (req: any, res) => {
   if (!keyEnc) return res.status(400).json({ error: { code: 'bad_request', message: 'api_key 不能为空' } });
 
   run(
-    `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, updated_at) VALUES(?,?,?,?,?)
+    `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, prompt, updated_at) VALUES(?,?,?,?,?,?)
      ON CONFLICT(teacher_id) DO UPDATE SET api_base = excluded.api_base, api_key_enc = excluded.api_key_enc,
-       model = excluded.model, updated_at = excluded.updated_at`,
+       model = excluded.model, prompt = excluded.prompt, updated_at = excluded.updated_at`,
     req.user.id,
     api_base,
     keyEnc,
     model,
+    prompt,
     Date.now(),
   );
   res.json({ ok: true });
@@ -72,7 +99,16 @@ teacherAi.post('/ai-config/test', async (req: any, res) => {
 adminAi.get('/ai-config', (_req: any, res) => {
   const g = one<any>('SELECT * FROM ai_config WHERE teacher_id = 0');
   res.json({
-    ai: g ? { api_base: g.api_base, model: g.model, keyMask: maskKey(decryptSecret(g.api_key_enc)), updated_at: g.updated_at } : null,
+    ai: g
+      ? {
+          api_base: g.api_base,
+          model: g.model,
+          keyMask: maskKey(decryptSecret(g.api_key_enc)),
+          prompt: g.prompt ?? '',
+          updated_at: g.updated_at,
+        }
+      : null,
+    defaultPrompt: DEFAULT_PROMPT,
   });
 });
 
@@ -80,8 +116,22 @@ adminAi.put('/ai-config', (req: any, res) => {
   const api_base = String(req.body?.api_base ?? '').trim();
   const model = String(req.body?.model ?? '').trim();
   const api_key = String(req.body?.api_key ?? '').trim();
+  const prompt = String(req.body?.prompt ?? '').slice(0, 4000);
 
   if (!api_base && !model && !api_key) {
+    if (prompt.trim()) {
+      const cur = one<any>('SELECT * FROM ai_config WHERE teacher_id = 0');
+      run(
+        `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, prompt, updated_at) VALUES(0,?,?,?,?,?)
+         ON CONFLICT(teacher_id) DO UPDATE SET prompt = excluded.prompt, updated_at = excluded.updated_at`,
+        cur?.api_base ?? '',
+        cur?.api_key_enc ?? '',
+        cur?.model ?? '',
+        prompt,
+        Date.now(),
+      );
+      return res.json({ ok: true, promptOnly: true });
+    }
     run('DELETE FROM ai_config WHERE teacher_id = 0');
     return res.json({ ok: true, cleared: true });
   }
@@ -93,12 +143,13 @@ adminAi.put('/ai-config', (req: any, res) => {
   if (!keyEnc) return res.status(400).json({ error: { code: 'bad_request', message: 'api_key 不能为空' } });
 
   run(
-    `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, updated_at) VALUES(0,?,?,?,?)
+    `INSERT INTO ai_config(teacher_id, api_base, api_key_enc, model, prompt, updated_at) VALUES(0,?,?,?,?,?)
      ON CONFLICT(teacher_id) DO UPDATE SET api_base = excluded.api_base, api_key_enc = excluded.api_key_enc,
-       model = excluded.model, updated_at = excluded.updated_at`,
+       model = excluded.model, prompt = excluded.prompt, updated_at = excluded.updated_at`,
     api_base,
     keyEnc,
     model,
+    prompt,
     Date.now(),
   );
   res.json({ ok: true });

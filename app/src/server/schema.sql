@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS ai_config (
   api_base    TEXT    NOT NULL DEFAULT '',
   api_key_enc TEXT    NOT NULL DEFAULT '',
   model       TEXT    NOT NULL DEFAULT '',
+  prompt      TEXT    NOT NULL DEFAULT '',   -- 自定义审核提示词；空 = 用上级/内置默认
   updated_at  INTEGER NOT NULL,
   UNIQUE (teacher_id)
 );

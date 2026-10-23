@@ -24,6 +24,13 @@ db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(fs.readFileSync(path.join(HERE, 'schema.sql'), 'utf8'));
 
+/** 轻量迁移：老库补字段（CREATE TABLE IF NOT EXISTS 不会改已有表） */
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+ensureColumn('ai_config', 'prompt', "prompt TEXT NOT NULL DEFAULT ''");
+
 /** 事务包装：better-sqlite3 风格的同步语义 */
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');

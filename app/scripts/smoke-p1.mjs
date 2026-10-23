@@ -320,12 +320,16 @@ console.log('\n[5] Excel 导出');
 console.log('\n[6] AI 审核');
 {
   const calls = [];
+  const sysPrompts = [];
   const mock = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
-      const content = JSON.parse(body || '{}')?.messages?.[1]?.content ?? '';
+      const parsed = JSON.parse(body || '{}');
+      const content = parsed?.messages?.[1]?.content ?? '';
+      const sysPrompt = parsed?.messages?.[0]?.content ?? '';
       calls.push(content);
+      if (!sysPrompts.length) sysPrompts.push(sysPrompt);
       if (req.url?.startsWith('/slow')) {
         return setTimeout(() => res.end(JSON.stringify({ choices: [{ message: { content: '{}' } }] })), 12000);
       }
@@ -384,6 +388,22 @@ console.log('\n[6] AI 审核');
   }
   eq('AI 判定广告为驳回', rejected?.moderation_status, 'rejected');
   eq('带违规类别', rejected?.ai_category, '广告');
+
+  // 灌水/口癖要被放行，不能当违规
+  ok('审核提示词明确了灌水放行', /灌水/.test(sysPrompts[0] ?? '') && /不要因为/.test(sysPrompts[0] ?? ''), (sysPrompts[0] ?? '').slice(0, 120));
+  await author.post(`/api/student/activities/${scoreAct.id}/submit`, {
+    scores,
+    comment: '哈哈 好好好',
+    commentTargetId: detail.targets[0].id,
+  });
+  let filler = null;
+  for (let i = 0; i < 40; i++) {
+    const list = (await teacher.get(`/api/teacher/activities/${scoreAct.id}/comments`)).data.comments;
+    filler = list.find((c) => c.content.includes('哈哈 好好好'));
+    if (filler && filler.moderation_status !== 'pending') break;
+    await sleep(150);
+  }
+  eq('灌水评语正常放行', filler?.moderation_status, 'approved');
 
   // 超时 → 保持 pending
   await teacher.put('/api/teacher/ai-config', {
@@ -508,6 +528,64 @@ console.log('\n[9] 管理员功能');
   ok('并要求改密码', !!relogin.data.must_change_pwd, relogin.data);
 
   eq('学生接口不对外', (await teacher.get('/api/admin/students')).status, 403);
+}
+
+
+/* ================= 10. AI 提示词自定义（超管默认 + 教师覆盖） ================= */
+
+console.log('\n[10] AI 提示词自定义');
+{
+  const sysPrompts = [];
+  const mock = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const parsed = JSON.parse(body || '{}');
+      sysPrompts.push(parsed?.messages?.[0]?.content ?? '');
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ verdict: 'approved', category: '', reason: 'ok' }) } }] }));
+    });
+  });
+  await new Promise((r) => mock.listen(0, '0.0.0.0', r));
+  const port = mock.address().port;
+  const base = `http://${AI_HOST}:${port}/v1`;
+
+  const admin = client();
+  eq('超管登录（提示词用例）', (await admin.post('/api/auth/login', { username: 'admin', password: 'admin6666' })).status, 200);
+
+  const g = await admin.get('/api/admin/ai-config');
+  ok('超管配置接口返回内置默认提示词', typeof g.data.defaultPrompt === 'string' && g.data.defaultPrompt.includes('灌水'), g.data.defaultPrompt?.slice(0, 40));
+
+  // 超管设全局提示词
+  await admin.put('/api/admin/ai-config', { api_base: base, model: 'mock-model', api_key: 'sk-admin-1234567890', prompt: 'GLOBAL-RULE: 只拦广告' });
+  eq('超管存下全局提示词', (await admin.get('/api/admin/ai-config')).data.ai.prompt, 'GLOBAL-RULE: 只拦广告');
+
+  // 教师没自定义 → 继承超管
+  const t1 = (await teacher.get('/api/teacher/ai-config')).data;
+  eq('教师继承超管提示词', t1.effectivePrompt, 'GLOBAL-RULE: 只拦广告');
+
+  // 教师自定义 → 以教师为准
+  await teacher.put('/api/teacher/ai-config', { api_base: base, model: 'mock-model', api_key: 'sk-teacher-1234567890', prompt: 'TEACHER-RULE: 只拦辱骂' });
+  eq('教师用自己的提示词', (await teacher.get('/api/teacher/ai-config')).data.effectivePrompt, 'TEACHER-RULE: 只拦辱骂');
+
+  // 实际调用时用的确实是教师那套
+  const detail = (await author.get(`/api/student/activities/${scoreAct.id}`)).data;
+  const scores = [];
+  for (const t of detail.targets) for (const it of detail.items) scores.push({ targetId: t.id, itemId: it.id, score: 7 });
+  await author.post(`/api/student/activities/${scoreAct.id}/submit`, { scores, comment: '提示词用例评语', commentTargetId: detail.targets[0].id });
+  for (let i = 0; i < 40 && !sysPrompts.length; i++) await sleep(150);
+  ok('调用模型时用了教师自定义提示词', (sysPrompts[0] ?? '').includes('TEACHER-RULE'), (sysPrompts[0] ?? '').slice(0, 60));
+
+  // 教师清空提示词（保留接口配置）→ 回退到超管
+  await teacher.put('/api/teacher/ai-config', { api_base: base, model: 'mock-model', api_key: '', prompt: '' });
+  eq('清空教师提示词后回退到超管', (await teacher.get('/api/teacher/ai-config')).data.effectivePrompt, 'GLOBAL-RULE: 只拦广告');
+
+  // 超管也清空 → 回退内置默认
+  await admin.put('/api/admin/ai-config', { api_base: base, model: 'mock-model', api_key: '', prompt: '' });
+  const fallback = (await teacher.get('/api/teacher/ai-config')).data.effectivePrompt;
+  ok('都清空后回退到内置默认', fallback.includes('灌水'), fallback.slice(0, 40));
+
+  mock.close();
 }
 
 console.log('\n' + '='.repeat(48));

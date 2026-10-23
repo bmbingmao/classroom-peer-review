@@ -8,6 +8,8 @@ export default function TeacherAi() {
   const [apiBase, setApiBase] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [promptText, setPromptText] = useState('');
+  const [showDefault, setShowDefault] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -19,6 +21,7 @@ export default function TeacherAi() {
       const m = r.own?.model ?? '';
       setApiBase(base);
       setModel(m);
+      setPromptText(r.own?.prompt ?? '');
       const hit = matchPreset(base, m);
       setPresetKey(hit?.key ?? 'custom');
     } catch (e) {
@@ -42,7 +45,12 @@ export default function TeacherAi() {
   async function save() {
     setBusy(true);
     try {
-      await put('/api/teacher/ai-config', { api_base: apiBase.trim(), model: model.trim(), api_key: apiKey.trim() });
+      await put('/api/teacher/ai-config', {
+        api_base: apiBase.trim(),
+        model: model.trim(),
+        api_key: apiKey.trim(),
+        prompt: promptText,
+      });
       setApiKey('');
       toast('已保存');
       load();
@@ -75,6 +83,7 @@ export default function TeacherAi() {
       await put('/api/teacher/ai-config', {});
       setApiBase('');
       setModel('');
+      setPromptText('');
       setPresetKey('custom');
       toast('已清空');
       load();
@@ -93,6 +102,10 @@ export default function TeacherAi() {
         <h3>AI 评语审核</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           学生提交评语后，系统会调用大模型判断是否放行。<b>没配置、调用失败、超过 8 秒</b>，评语都会停在「待审」等你自己放行或驳回，不会卡住学生提交。
+        </p>
+        <p className="hint" style={{ marginTop: -6 }}>
+          只拦「不适合公开展示」的内容（辱骂、广告、色情、政治敏感、人身攻击）。
+          「无」「哈哈」「好好好」这类灌水会正常上墙——课堂上的随手反应不用管。
         </p>
         <div className="row" style={{ gap: 10, marginBottom: 14 }}>
           {cfg.effective ? (
@@ -140,6 +153,60 @@ export default function TeacherAi() {
           <label>API Key {cfg.own?.keyMask ? `（已存：${cfg.own.keyMask}，不填就是沿用）` : ''}</label>
           <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." />
           <div className="hint">加密存储（AES-256-GCM），接口返回永远脱敏。</div>
+        </div>
+
+        <div className="field">
+          <label>审核提示词（可选）</label>
+          <textarea
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+            rows={7}
+            placeholder="留空 = 使用超管设置的全局提示词（没设置就用系统内置默认）"
+            style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.6 }}
+          />
+          <div className="hint">
+            当前生效：
+            {promptText.trim()
+              ? ' 你自己的自定义提示词'
+              : cfg.global?.prompt
+                ? ' 超管设置的全局提示词'
+                : ' 系统内置默认'}{' '}
+            ·{' '}
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowDefault((v) => !v);
+              }}
+            >
+              {showDefault ? '收起默认提示词' : '看看默认提示词'}
+            </a>
+            {promptText.trim() && (
+              <>
+                {' · '}
+                <a href="#" onClick={(e) => { e.preventDefault(); setPromptText(''); }}>
+                  恢复默认
+                </a>
+              </>
+            )}
+          </div>
+          {showDefault && (
+            <pre
+              style={{
+                whiteSpace: 'pre-wrap',
+                background: 'var(--bg-soft, #f6f8fb)',
+                border: '1px solid var(--line)',
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 12,
+                lineHeight: 1.6,
+                maxHeight: 240,
+                overflow: 'auto',
+              }}
+            >
+              {cfg.effectivePrompt}
+            </pre>
+          )}
         </div>
 
         <div className="row">

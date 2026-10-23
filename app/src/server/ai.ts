@@ -5,30 +5,41 @@ import { decryptSecret } from './crypto.ts';
 export const AI_CATEGORIES = ['辱骂', '广告', '色情', '政治敏感', '人身攻击', '其他'] as const;
 export type AiCategory = (typeof AI_CATEGORIES)[number];
 
-export type AiCfg = { api_base: string; api_key: string; model: string };
+export type AiCfg = { api_base: string; api_key: string; model: string; prompt: string };
 
 /** 取生效配置：教师私有优先，回退全局兜底；都没有返回 null */
 export function resolveAiConfig(teacherId: number): AiCfg | null {
   const own = one<any>('SELECT * FROM ai_config WHERE teacher_id = ?', teacherId);
   const global_ = one<any>('SELECT * FROM ai_config WHERE teacher_id = 0');
+
+  // 接口地址/密钥/模型：教师自己的优先，不完整就用超管兜底
+  let base: AiCfg | null = null;
   for (const row of [own, global_]) {
     if (!row) continue;
     const api_key = decryptSecret(row.api_key_enc);
     if (row.api_base && api_key && row.model) {
-      return { api_base: row.api_base.replace(/\/+$/, ''), api_key, model: row.model };
+      base = { api_base: row.api_base.replace(/\/+$/, ''), api_key, model: row.model, prompt: '' };
+      break;
     }
   }
-  return null;
+  if (!base) return null;
+
+  // 提示词独立解析：教师自定义 > 超管全局 > 内置默认
+  const prompt = String(own?.prompt ?? '').trim() || String(global_?.prompt ?? '').trim() || DEFAULT_PROMPT;
+  return { ...base, prompt };
 }
 
-const PROMPT = `你是课堂互评系统的评语审核员。学生给同学的作品写评语，你判断这条评语能否公开展示。
+/** 内置默认提示词：只拦不适合公开展示的内容，灌水放行 */
+export const DEFAULT_PROMPT = `你是课堂互评系统的评语审核员。学生给同学的作品写评语，你判断这条评语能否公开展示。
 只输出一个 JSON 对象，不要任何多余文字：
 {"verdict":"approved"|"rejected","category":"辱骂|广告|色情|政治敏感|人身攻击|其他","reason":"不超过30字"}
-判定标准：
+判定标准（本系统只过滤"不适合公开展示"的内容，不管质量高低）：
 - 建设性批评、指出缺点、语气直接但就事论事 → approved
-- 辱骂、人身攻击、歧视、色情、广告引流、政治敏感 → rejected
-- 与作品无关的灌水（如“啊啊啊”“123”）→ rejected，category=其他
-- 拿不准 → approved`;
+- 灌水、口癖、情绪化但无害的短句（如“无”“哈哈”“好好好”“666”“1”“。”“赞”）→ approved，不算违规
+- 只有确实不适合公开展示的才 rejected：辱骂、人身攻击、歧视、色情、广告引流、政治敏感
+- 拿不准 → approved
+
+注意：**不要因为"内容简短""没实质信息""与作品无关"而驳回**。学生随手写个"好好好"是正常课堂反应，照常通过。`;
 
 export type ModerationOutcome =
   | { ok: true; verdict: 'approved' | 'rejected'; category: string; reason: string }
@@ -51,7 +62,7 @@ export async function moderate(content: string, cfg: AiCfg): Promise<ModerationO
         temperature: 0,
         max_tokens: 200,
         messages: [
-          { role: 'system', content: PROMPT },
+          { role: 'system', content: cfg.prompt || DEFAULT_PROMPT },
           { role: 'user', content: `评语：${content}` },
         ],
       }),
