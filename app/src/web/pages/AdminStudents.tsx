@@ -78,7 +78,8 @@ export default function AdminStudents() {
                 <tr>
                   <th>学号</th>
                   <th>姓名</th>
-                  <th>积分</th>
+                  <th>当前积分</th>
+                  <th>累计获得</th>
                   <th>所属组</th>
                   <th>所属教师</th>
                   <th>状态</th>
@@ -91,6 +92,7 @@ export default function AdminStudents() {
                     <td>{s.username}</td>
                     <td>{s.display_name}</td>
                     <td>{s.points_cached}</td>
+                    <td className="muted">{s.earned ?? 0}</td>
                     <td>{s.groups_text || <span className="hint">未分组</span>}</td>
                     <td>{s.teachers_text || <span className="hint">—</span>}</td>
                     <td>

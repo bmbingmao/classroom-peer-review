@@ -235,6 +235,11 @@ console.log('\n[4] 积分');
 
   const mine = (await stu.get('/api/student/points')).data;
   ok('学生能看自己的流水', mine.ledger.length >= 2, mine.ledger.length);
+  ok('带历史累计获得', typeof mine.earned === 'number' && mine.earned >= 10, mine.earned);
+  ok('累计获得 ≥ 当前积分', mine.earned >= mine.points, { earned: mine.earned, points: mine.points });
+  ok('带历史消费', typeof mine.spent === 'number' && mine.spent >= 0, mine.spent);
+  ok('获得 − 消费 = 当前积分', mine.earned - mine.spent === mine.points, { earned: mine.earned, spent: mine.spent, points: mine.points });
+  ok('排行榜带累计获得', lb.rows.every((r) => typeof r.earned === 'number'), lb.rows[0]);
   ok('流水带原因', mine.ledger.some((l) => String(l.reason).includes('课堂积极发言')), mine.ledger.map((l) => l.reason));
 
   const mineBoard = (await stu.get('/api/student/points/leaderboard')).data;
@@ -475,6 +480,7 @@ console.log('\n[9] 管理员功能');
   ok('学生列表非空', list.data.students.length >= 8, list.data.students.length);
   const first = list.data.students[0];
   ok('带出所属组和教师', 'groups_text' in first && 'teachers_text' in first, first);
+  ok('学生总览带累计获得', typeof first.earned === 'number', first.earned);
   ok('能按姓名搜索', (await admin.get('/api/admin/students?q=张三')).data.students.length === 1);
 
   // 改用户名：建一个临时教师走一遍完整流程

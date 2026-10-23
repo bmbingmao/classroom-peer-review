@@ -65,6 +65,7 @@ router.get('/students', (req: any, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const rows = all<any>(
     `SELECT u.id, u.username, u.display_name, u.points_cached, u.status, u.must_change_pwd, u.created_at,
+            (SELECT COALESCE(SUM(delta), 0) FROM point_ledger WHERE student_id = u.id AND delta > 0) AS earned,
             (SELECT GROUP_CONCAT(g.name, '、')
                FROM group_members gm JOIN groups g ON g.id = gm.group_id
               WHERE gm.student_id = u.id) AS groups_text,

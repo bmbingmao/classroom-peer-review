@@ -39,6 +39,16 @@ export default function StudentPoints({ nav }: { nav: (p: string) => void }) {
             <div style={{ fontSize: 24, fontWeight: 700 }}>{rank ? `第 ${rank} 名` : '—'}</div>
           </div>
         </div>
+        <div style={{ display: 'flex', gap: 28, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+          <div>
+            <div className="muted" style={{ fontSize: 13 }}>历史获得</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ok, #12a150)' }}>{data.earned ?? 0}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 13 }}>已消费</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{data.spent ?? 0}</div>
+          </div>
+        </div>
         <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
           完成一次投票或评分 +10 · 发一个表情 −5 · 收到正面表情 +1
           {data.points < 5 && <div style={{ color: 'var(--danger)', marginTop: 4 }}>积分不足 5，暂时不能发表情</div>}

@@ -93,7 +93,8 @@ export default function TeacherPoints() {
                 <th style={{ width: 40 }}>#</th>
                 <th>学号</th>
                 <th>姓名</th>
-                <th>积分</th>
+                <th>当前积分</th>
+                <th>累计获得</th>
                 <th style={{ width: 90 }}></th>
               </tr>
             </thead>
@@ -106,6 +107,7 @@ export default function TeacherPoints() {
                   <td>
                     <b>{r.points}</b>
                   </td>
+                  <td className="muted">{r.earned ?? '—'}</td>
                   <td>
                     <button className="btn btn-sm" onClick={() => pick(r)}>
                       加减分 / 流水
@@ -115,7 +117,7 @@ export default function TeacherPoints() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted">
+                  <td colSpan={6} className="muted">
                     没有学生
                   </td>
                 </tr>
