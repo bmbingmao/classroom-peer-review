@@ -106,7 +106,7 @@ console.log('\n[2] 教师端：待审、小眼睛、图表、导出');
 
   const card = page.locator('.card', { hasText: '作品互评 · 3月作业' }).first();
   await card.locator('button:has-text("结果")').click();
-  await page.waitForSelector('text=去极值说明');
+  await page.waitForSelector('text=计分规则');
 
   // 待审提示
   ok('顶部出现待审提醒', (await page.locator('text=条评语待你审核').count()) > 0);
@@ -219,7 +219,7 @@ console.log('\n[4] 手机端 375px');
   await login(page, 'teacher1', 'teach123');
   await page.waitForSelector('text=作品互评 · 3月作业');
   await page.goto(BASE + '/#/t/result/1');
-  await page.waitForSelector('text=去极值说明');
+  await page.waitForSelector('text=计分规则');
   await page.click('a:has-text("评语")');
   await page.waitForTimeout(700);
   const of = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

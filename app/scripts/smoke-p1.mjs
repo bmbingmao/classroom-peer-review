@@ -49,6 +49,7 @@ function client() {
     get: (p) => req('GET', p),
     post: (p, b) => req('POST', p, b),
     put: (p, b) => req('PUT', p, b),
+    patch: (p, b) => req('PATCH', p, b),
     getRaw: (p) => req('GET', p, undefined, true),
     delete: (p) => req('DELETE', p),
   };
@@ -218,6 +219,113 @@ console.log('\n[3] 表情：扣分 / 加分 / 防刷 / 折叠');
   eq('教师可恢复', restore.status, 200);
   const wallRestored = (await other.get(`/api/student/activities/${scoreAct.id}/comments`)).data;
   ok('恢复后学生又能看到', wallRestored.comments.some((c) => c.id === target.id));
+}
+
+/* ================= 3.5 教师评分 + 自定义两端剔除数 ================= */
+console.log('\n[3.5] 教师评分与计分规则');
+{
+  const r0 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  ok('结果带计分设置', !!r0.scoring, r0.scoring);
+  eq('默认教师权重 60%', r0.scoring.teacherWeight, 60);
+  ok('默认自动剔除', r0.scoring.auto === true, r0.scoring);
+  ok('默认没有教师分', r0.scoring.teacherScoredCount === 0, r0.scoring);
+
+  const t0 = r0.targets[0];
+  const fullScores = r0.items.map((it) => ({ itemId: it.id, score: it.max_score }));
+  const save = await teacher.put(`/api/teacher/activities/${scoreAct.id}/teacher-scores`, {
+    targetId: t0.id,
+    scores: fullScores,
+  });
+  eq('教师打分保存成功', save.status, 200);
+
+  const r1 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  const t1 = r1.targets.find((t) => t.id === t0.id);
+  eq('教师分计入项数', r1.scoring.teacherScoredCount, r0.items.length);
+  ok('教师满分 → 教师总分是满分', t1.teacherTotal >= 9.9, t1.teacherTotal);
+  const expect60 = Math.round((t1.studentTotal * 0.4 + t1.teacherTotal * 0.6) * 100) / 100;
+  ok('合计按 60/40 合成', Math.abs(t1.total - expect60) <= 0.02, { total: t1.total, expect60 });
+  ok('教师满分拉高了合计', t1.total > t1.studentTotal, { total: t1.total, student: t1.studentTotal });
+  ok('未打分的作品仍是学生互评', r1.targets[1].total === r1.targets[1].studentTotal, r1.targets[1]);
+
+  const sres = (await students['2023007'].get(`/api/student/results/${scoreAct.id}`)).data;
+  const st1 = sres.targets.find((t) => t.id === t0.id);
+  ok('学生端合计与教师端一致', Math.abs(st1.total - t1.total) < 0.02, { student: st1.total, teacher: t1.total });
+  ok('学生端不下发教师分数', st1.items.every((x) => x.teacher === undefined), st1.items[0]);
+
+  // 权重可调
+  eq('改权重为 70%', (await teacher.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { teacherWeight: 70 })).status, 200);
+  const r70 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  const t70 = r70.targets.find((t) => t.id === t0.id);
+  const expect70 = Math.round((t70.studentTotal * 0.3 + t70.teacherTotal * 0.7) * 100) / 100;
+  ok('70/30 生效', Math.abs(t70.total - expect70) <= 0.02, { total: t70.total, expect70 });
+  await teacher.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { teacherWeight: 60 });
+
+  // 自定义两端剔除：低值剔 2、高值 0
+  const itemId = r0.items[0].id;
+  const manual = await teacher.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { trimLow: 2, trimHigh: 0 });
+  eq('保存剔除设置', manual.status, 200);
+  const r2 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  eq('低值剔除数被记住', r2.scoring.trimLow, 2);
+  eq('高值剔除数被记住', r2.scoring.trimHigh, 0);
+  ok('不再是自动规则', r2.scoring.auto === false, r2.scoring);
+  const i2 = r2.targets.find((t) => t.id === t0.id).items.find((x) => x.itemId === itemId);
+  ok('该项标记为手动', i2.auto === false, i2);
+  if (i2.n >= 3) {
+    eq('低端剔 2 个', i2.low, 2);
+    eq('高端剔 0 个', i2.high, 0);
+    eq('被剔的都是最低分', i2.removedLow.length, 2);
+    eq('没有剔除高分', i2.removedHigh.length, 0);
+    ok('剔完剩 n-2 个', i2.mean !== null && i2.n - 2 >= 1, i2);
+  }
+
+  // 学生端也跟着新规则重算
+  const sres2 = (await students['2023007'].get(`/api/student/results/${scoreAct.id}`)).data;
+  const st2 = sres2.targets.find((x) => x.id === t0.id);
+  ok('学生端同步新规则', Math.abs(st2.total - r2.targets.find((t) => t.id === t0.id).total) < 0.02, st2.total);
+
+  // 越界 / 非法参数
+  eq(
+    '超出区间的分数被拒',
+    (await teacher.put(`/api/teacher/activities/${scoreAct.id}/teacher-scores`, {
+      targetId: t0.id,
+      scores: [{ itemId, score: 9999 }],
+    })).status,
+    400,
+  );
+  eq(
+    '权重越界被拒',
+    (await teacher.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { teacherWeight: 200 })).status,
+    400,
+  );
+
+  // 恢复自动
+  eq('恢复自动剔除', (await teacher.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { auto: true })).status, 200);
+  const r3 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  ok('自动规则回来了', r3.scoring.auto === true && r3.scoring.trimLow === null, r3.scoring);
+
+  // 清空教师分 → 合计回到纯学生互评
+  eq(
+    '清空教师分',
+    (await teacher.put(`/api/teacher/activities/${scoreAct.id}/teacher-scores`, { targetId: t0.id, scores: [] })).status,
+    200,
+  );
+  const r4 = (await teacher.get(`/api/teacher/results/${scoreAct.id}`)).data;
+  const t4 = r4.targets.find((t) => t.id === t0.id);
+  ok('清空后合计 = 学生互评', Math.abs(t4.total - t4.studentTotal) < 0.02, { total: t4.total, student: t4.studentTotal });
+  eq('教师分归零', r4.scoring.teacherScoredCount, 0);
+
+  // 未登录不能打分
+  const anon = client();
+  eq(
+    '未登录不能打分',
+    (await anon.put(`/api/teacher/activities/${scoreAct.id}/teacher-scores`, { targetId: t0.id, scores: [] })).status,
+    401,
+  );
+  eq(
+    '未登录不能改规则',
+    (await anon.patch(`/api/teacher/activities/${scoreAct.id}/scoring-settings`, { teacherWeight: 0 })).status,
+    401,
+  );
 }
 
 /* ================= 4. 积分榜与手动加减分 ================= */

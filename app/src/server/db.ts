@@ -30,6 +30,10 @@ function ensureColumn(table: string, column: string, ddl: string) {
   if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
 ensureColumn('ai_config', 'prompt', "prompt TEXT NOT NULL DEFAULT ''");
+// 教师评分权重（百分比）与两端剔除数（NULL = 按 n×5% 自动）
+ensureColumn('activities', 'teacher_weight', 'teacher_weight INTEGER NOT NULL DEFAULT 60');
+ensureColumn('activities', 'trim_low', 'trim_low INTEGER DEFAULT NULL');
+ensureColumn('activities', 'trim_high', 'trim_high INTEGER DEFAULT NULL');
 
 /** 事务包装：better-sqlite3 风格的同步语义 */
 export function tx<T>(fn: () => T): T {

@@ -69,10 +69,10 @@ console.log('\n[教师端 · 桌面 1280x900]');
   // 进评分结果页
   const card = page.locator('.card', { hasText: '作品互评 · 3月作业' }).first();
   await card.locator('button:has-text("结果")').click();
-  await page.waitForSelector('text=去极值说明', { timeout: 8000 });
+  await page.waitForSelector('text=计分规则', { timeout: 8000 });
   ok('结果页打开', true);
   const resultText = await page.locator('body').innerText();
-  ok('显示加权总分', resultText.includes('加权总分'));
+  ok('显示合计总分', resultText.includes('合计'));
   ok('显示有效人数与剔除说明', resultText.includes('人数 n') && resultText.includes('被剔除的分数'));
   await page.click('a:has-text("未交")');
   await page.waitForSelector('text=还没交的人');
@@ -101,7 +101,7 @@ console.log('\n[教师端 · 桌面 1280x900]');
   await voteCard.locator('button:has-text("结果")').click();
   await page.waitForSelector('text=实时票数');
   const voteText = await page.locator('body').innerText();
-  ok('投票结果只显示票数', voteText.includes('实时票数') && !voteText.includes('加权总分'));
+  ok('投票结果只显示票数', voteText.includes('实时票数') && !voteText.includes('合计总分'));
   ok('最高票有 👑 标记', voteText.includes('当前最高'));
   await shot(page, '05-vote-result');
 

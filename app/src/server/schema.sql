@@ -122,6 +122,18 @@ CREATE TABLE IF NOT EXISTS score_records (
 );
 CREATE INDEX IF NOT EXISTS idx_sr_activity ON score_records(activity_id, student_id);
 
+-- 教师本人打分：每个评分项一条，与 score_records（学生互评）分开存，
+-- 这样学生互评的去极值与教师 60% 权重互不干扰。
+CREATE TABLE IF NOT EXISTS teacher_scores (
+  activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+  target_id   INTEGER NOT NULL REFERENCES score_targets(id) ON DELETE CASCADE,
+  item_id     INTEGER NOT NULL REFERENCES score_items(id) ON DELETE CASCADE,
+  score       INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (target_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ts_scores_activity ON teacher_scores(activity_id);
+
 -- 草稿与正式分分离：草稿不参与任何统计
 CREATE TABLE IF NOT EXISTS score_drafts (
   activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,

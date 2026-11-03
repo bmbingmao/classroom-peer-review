@@ -81,7 +81,7 @@ export default function StudentResult({ id, nav }: { id: number; nav: (p: string
           <div className="card">
             <h3>各作品得分</h3>
             <p className="muted" style={{ marginTop: 0 }}>
-              成绩按去极值平均计算（去掉一个最高分和一个最低分后取平均），评委身份匿名。
+              成绩按去极值平均计算（去掉两端的极端分后取平均），评委身份匿名。{data.hasTeacherScores ? ' 部分成绩含教师评分。' : ''}
             </p>
             {data.targets.map((t: any) => (
               <div key={t.id} style={{ padding: '12px 0', borderTop: '1px solid var(--line)' }}>
@@ -99,7 +99,8 @@ export default function StudentResult({ id, nav }: { id: number; nav: (p: string
                   {t.items
                     .map((it: any) => {
                       const meta = data.items.find((x: any) => x.id === it.itemId);
-                      return `${meta?.name ?? ''} ${it.mean === null ? '—' : it.mean.toFixed(2)}`;
+                      const v = it.combined ?? it.mean;
+                      return `${meta?.name ?? ''} ${v === null || v === undefined ? '—' : Number(v).toFixed(2)}`;
                     })
                     .join(' · ')}
                 </div>

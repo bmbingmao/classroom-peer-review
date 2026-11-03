@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { all, one, run } from '../db.ts';
 import { int } from '../util.ts';
 import { activityItems, effectiveStatus, getActivityForTeacher, invitedStudentIds } from '../lib.ts';
-import { trimmedMean, weightedTotal } from '../scoring.ts';
+import { blend, trimmedMean, weightedTotal, type TrimSpec } from '../scoring.ts';
 
 const router = Router();
 
@@ -135,13 +135,29 @@ async function buildWorkbook(a: any): Promise<ExcelJS.Workbook> {
     ? all<any>('SELECT target_id, item_id, student_id, score FROM score_records WHERE activity_id = ?', a.id)
     : [];
 
+  const teacherWeight =
+    (a as any).teacher_weight === null || (a as any).teacher_weight === undefined ? 60 : Number((a as any).teacher_weight);
+  const manualTrim =
+    ((a as any).trim_low !== null && (a as any).trim_low !== undefined) ||
+    ((a as any).trim_high !== null && (a as any).trim_high !== undefined);
+  const trim: TrimSpec | null = manualTrim
+    ? { low: Number((a as any).trim_low ?? 0), high: Number((a as any).trim_high ?? 0) }
+    : null;
+  const teacherMap = new Map<string, number>();
+  for (const ts of all<any>('SELECT target_id, item_id, score FROM teacher_scores WHERE activity_id = ?', a.id)) {
+    teacherMap.set(`${ts.target_id}:${ts.item_id}`, ts.score);
+  }
+
   let trimmedResults: {
     targetId: number;
     label: string;
     itemId: number;
     n: number;
-    k: number;
+    low: number;
+    high: number;
     mean: number | null;
+    teacher: number | null;
+    combined: number | null;
     rawMean: number | null;
     removedLow: number[];
     removedHigh: number[];
@@ -158,7 +174,9 @@ async function buildWorkbook(a: any): Promise<ExcelJS.Workbook> {
         const entries = records
           .filter((r) => r.target_id === t.id && r.item_id === it.id)
           .map((r) => ({ studentId: r.student_id, score: r.score }));
-        const r = trimmedMean(entries);
+        const r = trimmedMean(entries, trim);
+        const teacher = teacherMap.get(`${t.id}:${it.id}`) ?? null;
+        const combined = blend(teacher, r.mean, teacherWeight);
         for (const e of r.removedLow) marks.set(`${t.id}:${it.id}:${e.studentId}`, 'low');
         for (const e of r.removedHigh) marks.set(`${t.id}:${it.id}:${e.studentId}`, 'high');
         trimmedResults.push({
@@ -166,13 +184,16 @@ async function buildWorkbook(a: any): Promise<ExcelJS.Workbook> {
           label: t.anon_label,
           itemId: it.id,
           n: r.n,
-          k: r.k,
+          low: r.low,
+          high: r.high,
           mean: r.mean,
+          teacher,
+          combined,
           rawMean: r.rawMean,
           removedLow: r.removedLow.map((e) => e.score),
           removedHigh: r.removedHigh.map((e) => e.score),
         });
-        perItem.push({ itemId: it.id, weight: it.weight, mean: r.mean });
+        perItem.push({ itemId: it.id, weight: it.weight, mean: combined });
       }
       totals.set(t.id, weightedTotal(perItem));
     }
@@ -215,7 +236,21 @@ async function buildWorkbook(a: any): Promise<ExcelJS.Workbook> {
 
     /* 4. 去极值结果 */
     const result = wb.addWorksheet('去极值结果');
-    result.addRow(['被评对象', '真实对应学生', '评分项', '权重', '有效人数 n', '两端各剔 k', '去极值均分', '原始均分', '剔除的最低分', '剔除的最高分']);
+    result.addRow([
+      '被评对象',
+      '真实对应学生',
+      '评分项',
+      '权重',
+      '有效人数 n',
+      '低值剔除',
+      '高值剔除',
+      '学生去极值均分',
+      '教师评分',
+      `合计（教师${teacherWeight}%）`,
+      '原始均分',
+      '剔除的最低分',
+      '剔除的最高分',
+    ]);
     result.getRow(1).font = { bold: true };
     for (const t of targets) {
       const owner = t.student_id ? one<any>('SELECT display_name, username FROM users WHERE id = ?', t.student_id) : null;
@@ -228,14 +263,31 @@ async function buildWorkbook(a: any): Promise<ExcelJS.Workbook> {
           it.name,
           it.weight,
           r.n,
-          r.k,
+          r.low,
+          r.high,
           r.mean === null ? '' : round2(r.mean),
+          r.teacher === null ? '' : round2(r.teacher),
+          r.combined === null ? '' : round2(r.combined),
           r.rawMean === null ? '' : round2(r.rawMean),
           r.removedLow.join('、'),
           r.removedHigh.join('、'),
         ]);
       }
-      result.addRow([t.anon_label, owner ? `${owner.display_name}(${owner.username})` : '', '【加权总分】', '', '', '', totals.get(t.id) ?? '', '', '', '']);
+      result.addRow([
+        t.anon_label,
+        owner ? `${owner.display_name}(${owner.username})` : '',
+        '【加权总分】',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        totals.get(t.id) ?? '',
+        '',
+        '',
+        '',
+      ]);
       result.lastRow!.font = { bold: true };
     }
   }

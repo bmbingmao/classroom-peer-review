@@ -163,11 +163,19 @@ const scoreCard = [...W.document.querySelectorAll('.card')].find((c) => (c.textC
 ok('找到评分活动的卡片', !!scoreCard);
 const scoreBtn = [...scoreCard.querySelectorAll('button')].find((b) => (b.textContent || '').includes('结果'));
 click(scoreBtn);
-await waitFor(() => text().includes('去极值说明'), '结果页');
+await waitFor(() => text().includes('计分规则'), '结果页');
 ok('结果页打开', text().includes('作品A'));
-ok('显示去极值规则说明', text().includes('两端各去掉'));
-ok('显示加权总分', text().includes('加权总分'));
+ok('显示计分规则说明', text().includes('教师评分占比') && text().includes('自动剔除'));
+ok('显示合计总分', text().includes('合计'));
 ok('显示有效人数', /人数 n/.test(text()));
+// 教师评分 tab：面板能渲染出每个作品的分数输入框
+click(byText('a', '教师评分'));
+await waitFor(() => text().includes('教师本人打分'), '教师评分面板');
+ok('教师评分面板渲染', (W.document.querySelectorAll('input[type="number"]').length ?? 0) >= 3);
+ok('教师评分面板带保存按钮', !!byText('button', '保存 作品A'));
+click(byText('a', '结果'));
+await waitFor(() => text().includes('计分规则'), '回到结果页');
+
 click(byText('a', '未交'));
 await waitFor(() => text().includes('还没交的人'), '未交名单页');
 ok('显示未交名单', text().includes('还没交的人') && text().includes('王五'));

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtTime, get, patch, post, reportError, statusClass, STATUS_TEXT, toast } from '../api';
+import { fmtTime, get, patch, post, put, reportError, statusClass, STATUS_TEXT, toast } from '../api';
 import { BarChart, RadarChart } from '../components/Chart';
 
-type Tab = 'result' | 'comments' | 'chart' | 'people';
+type Tab = 'result' | 'score' | 'comments' | 'chart' | 'people';
 
 export default function TeacherResult({ id, nav }: { id: number; nav: (p: string) => void }) {
   const [data, setData] = useState<any | null>(null);
@@ -220,6 +220,7 @@ export default function TeacherResult({ id, nav }: { id: number; nav: (p: string
       <div className="nav" style={{ padding: '0 0 10px', maxWidth: 'none' }}>
         {[
           ['result', '结果'],
+          ...(data.type === 'score' ? [['score', '🧑‍🏫 教师评分']] : []),
           ['comments', `评语 ${approved.length}`],
           ['chart', '图表'],
           ['people', `未交 ${data.absentees.length}`],
@@ -263,13 +264,7 @@ export default function TeacherResult({ id, nav }: { id: number; nav: (p: string
 
       {tab === 'result' && data.type === 'score' && (
         <>
-          <div className="card">
-            <h3>去极值说明</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              每个项目的分数按 <b>(分数升序, 学号)</b> 排序后，两端各去掉 k 个再取平均。规则：人数 n &lt; 5 不去极值；n ≥ 5
-              时 k = max(1, ⌈n×5%⌉)，并保证剩下的分数不少于 3 个。
-            </p>
-          </div>
+          <ScoringSettings data={data} onSaved={load} />
 
           {data.targets.map((t: any) => {
             const owner = ownerOf(t.id);
@@ -280,29 +275,41 @@ export default function TeacherResult({ id, nav }: { id: number; nav: (p: string
                     {t.anon_label}
                     {owner && <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>实际：{owner}</span>}
                     {t.hidden && <span className="badge badge-ended" style={{ marginLeft: 8 }}>已隐藏</span>}
+                    {!t.teacherScored && (
+                      <span className="badge badge-pending" style={{ marginLeft: 8 }}>
+                        教师未打分
+                      </span>
+                    )}
                   </h3>
                   <div style={{ fontSize: 20, fontWeight: 700 }}>
                     {t.total === null ? '—' : t.total.toFixed(2)}
                     <span className="muted" style={{ fontSize: 13, fontWeight: 400, marginLeft: 4 }}>
-                      加权总分
+                      合计
                     </span>
                   </div>
+                </div>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  学生互评 {t.studentTotal === null ? '—' : t.studentTotal.toFixed(2)}
+                  {' · '}教师 {t.teacherTotal === null ? '未打分' : t.teacherTotal.toFixed(2)}
+                  {' · '}教师权重 {data.scoring?.teacherWeight ?? 60}%
                 </div>
                 <div className="table-wrap" style={{ marginTop: 10 }}>
                   <table className="table">
                     <thead>
                       <tr>
                         <th>评分项</th>
-                        <th>去极值均分</th>
-                        <th>原始均分</th>
+                        <th>学生均分</th>
+                        <th>教师</th>
+                        <th>合计</th>
                         <th>人数 n</th>
-                        <th>两端各剔</th>
+                        <th>剔除（低/高）</th>
                         <th>被剔除的分数</th>
                       </tr>
                     </thead>
                     <tbody>
                       {t.items.map((it: any) => {
                         const meta = items.find((x: any) => x.id === it.itemId);
+                        const trimmed = (it.low ?? 0) + (it.high ?? 0) > 0;
                         return (
                           <tr key={it.itemId}>
                             <td>
@@ -311,18 +318,42 @@ export default function TeacherResult({ id, nav }: { id: number; nav: (p: string
                                 （{meta?.min_score}~{meta?.max_score}，权重 {meta?.weight}）
                               </span>
                             </td>
-                            <td style={{ fontWeight: 600 }}>{it.mean === null ? '—' : it.mean.toFixed(2)}</td>
-                            <td className="muted">{it.rawMean === null ? '—' : it.rawMean.toFixed(2)}</td>
+                            <td>{it.mean === null ? '—' : it.mean.toFixed(2)}</td>
+                            <td>{it.teacher === null ? <span className="muted">—</span> : it.teacher.toFixed(2)}</td>
+                            <td style={{ fontWeight: 600 }}>{it.combined === null ? '—' : it.combined.toFixed(2)}</td>
                             <td>{it.n}</td>
-                            <td>{it.k === 0 ? <span className="muted">不去极值</span> : it.k}</td>
+                            <td>
+                              {trimmed ? (
+                                <>
+                                  {it.low} / {it.high}
+                                  {it.auto && <span className="muted" style={{ fontSize: 12 }}> 自动</span>}
+                                </>
+                              ) : (
+                                <span className="muted">不剔除</span>
+                              )}
+                            </td>
                             <td className="muted" style={{ fontSize: 12 }}>
-                              {it.k === 0 ? (
+                              {!trimmed ? (
                                 '—'
                               ) : (
                                 <>
-                                  低：{it.removedLow.map((e: any) => `${judgeName(e.label, e.studentId)} ${e.score}`).join('、')}
-                                  <br />
-                                  高：{it.removedHigh.map((e: any) => `${judgeName(e.label, e.studentId)} ${e.score}`).join('、')}
+                                  {(it.low ?? 0) > 0 && (
+                                    <>
+                                      低：
+                                      {it.removedLow
+                                        .map((e: any) => `${judgeName(e.label, e.studentId)} ${e.score}`)
+                                        .join('、')}
+                                    </>
+                                  )}
+                                  {(it.low ?? 0) > 0 && (it.high ?? 0) > 0 && <br />}
+                                  {(it.high ?? 0) > 0 && (
+                                    <>
+                                      高：
+                                      {it.removedHigh
+                                        .map((e: any) => `${judgeName(e.label, e.studentId)} ${e.score}`)
+                                        .join('、')}
+                                    </>
+                                  )}
                                 </>
                               )}
                             </td>
@@ -337,6 +368,8 @@ export default function TeacherResult({ id, nav }: { id: number; nav: (p: string
           })}
         </>
       )}
+
+      {tab === 'score' && data.type === 'score' && <TeacherScorePanel data={data} onSaved={load} />}
 
       {tab === 'chart' && data.type === 'score' && (
         <>
@@ -538,5 +571,196 @@ function CommentRow({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ==================== 计分设置：教师权重 + 两端剔除数 ==================== */
+
+function ScoringSettings({ data, onSaved }: { data: any; onSaved: () => void }) {
+  const s = data.scoring ?? {};
+  const [weight, setWeight] = useState(String(s.teacherWeight ?? 60));
+  const [auto, setAuto] = useState<boolean>(s.auto !== false);
+  const [low, setLow] = useState(String(s.trimLow ?? 1));
+  const [high, setHigh] = useState(String(s.trimHigh ?? 1));
+  const [busy, setBusy] = useState(false);
+
+  async function save(payload: any) {
+    setBusy(true);
+    try {
+      await patch(`/api/teacher/activities/${data.id}/scoring-settings`, payload);
+      toast('已保存，分数已按新规则重算');
+      onSaved();
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputStyle = { width: 76, padding: '7px 10px', borderRadius: 10, border: '1px solid var(--line)' } as const;
+
+  return (
+    <div className="card">
+      <div className="spread">
+        <h3 style={{ margin: 0 }}>计分规则</h3>
+        <div className="muted" style={{ fontSize: 13 }}>
+          {s.teacherScoredCount > 0 ? `已录入 ${s.teacherScoredCount} 项教师分数` : '还没有教师分数'}
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 10, alignItems: 'center', marginTop: 10 }}>
+        <span>教师评分占比</span>
+        <input style={inputStyle} type="number" min={0} max={100} value={weight} onChange={(e) => setWeight(e.target.value)} />
+        <span className="muted">%　其余 {Math.max(0, 100 - (Number(weight) || 0))}% 给学生互评</span>
+        {[60, 70, 50].map((v) => (
+          <button key={v} className="btn btn-sm" onClick={() => setWeight(String(v))}>
+            {v}/{100 - v}
+          </button>
+        ))}
+      </div>
+
+      <div className="row" style={{ gap: 10, alignItems: 'center', marginTop: 12 }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          按规则自动剔除（n ≥ 5 时两端各 k = max(1, ⌈n×5%⌉) 个）
+        </label>
+      </div>
+
+      {!auto && (
+        <div className="row" style={{ gap: 10, alignItems: 'center', marginTop: 10 }}>
+          <span>剔除最低分</span>
+          <input style={inputStyle} type="number" min={0} max={50} value={low} onChange={(e) => setLow(e.target.value)} />
+          <span>个</span>
+          <span style={{ marginLeft: 8 }}>剔除最高分</span>
+          <input style={inputStyle} type="number" min={0} max={50} value={high} onChange={(e) => setHigh(e.target.value)} />
+          <span>个</span>
+        </div>
+      )}
+
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        针对恶意压分可以把「最低分」多剔一个；作品虚高可以把「最高分」多剔一个。改完立即按新规则重算，可随时改回。
+        剔除后至少保留 1 个分数。
+      </div>
+
+      <div className="row" style={{ marginTop: 10 }}>
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={busy}
+          onClick={() =>
+            save(
+              auto
+                ? { teacherWeight: Number(weight), auto: true }
+                : { teacherWeight: Number(weight), trimLow: Number(low), trimHigh: Number(high) },
+            )
+          }
+        >
+          保存规则
+        </button>
+        <button className="btn btn-sm" disabled={busy} onClick={() => save({ auto: true })}>
+          恢复自动剔除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== 教师打分面板 ==================== */
+
+function TeacherScorePanel({ data, onSaved }: { data: any; onSaved: () => void }) {
+  const items: any[] = data.items ?? [];
+  const targets: any[] = data.targets ?? [];
+  const [draft, setDraft] = useState<Record<number, Record<number, string>>>(() => {
+    const m: Record<number, Record<number, string>> = {};
+    for (const t of targets) {
+      m[t.id] = {};
+      for (const it of t.items) m[t.id][it.itemId] = it.teacher === null ? '' : String(it.teacher);
+    }
+    return m;
+  });
+  const [busy, setBusy] = useState<number | null>(null);
+
+  function setVal(targetId: number, itemId: number, v: string) {
+    setDraft((d) => ({ ...d, [targetId]: { ...(d[targetId] ?? {}), [itemId]: v } }));
+  }
+
+  async function save(t: any, clear = false) {
+    const row = clear ? {} : draft[t.id] ?? {};
+    const scores = items
+      .filter((it) => row[it.id] !== undefined && String(row[it.id]).trim() !== '')
+      .map((it) => ({ itemId: it.id, score: Number(row[it.id]) }));
+    setBusy(t.id);
+    try {
+      await put(`/api/teacher/activities/${data.id}/teacher-scores`, { targetId: t.id, scores });
+      if (clear) setDraft((d) => ({ ...d, [t.id]: {} }));
+      toast(clear ? '已清空该作品的教师分' : `已保存 ${t.anon_label} 的教师分`);
+      onSaved();
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>教师本人打分</h3>
+        <p className="muted" style={{ margin: 0 }}>
+          按评分项给每个作品打分，教师分参与合计计算（当前占比 {data.scoring?.teacherWeight ?? 60}%）。
+          只填一部分也可以，没填的评分项按学生互评均分算；一个都没填就完全按学生互评算。
+        </p>
+      </div>
+
+      {targets.map((t: any) => {
+        const row = draft[t.id] ?? {};
+        const filled = items.filter((it) => String(row[it.id] ?? '').trim() !== '').length;
+        return (
+          <div className="card" key={t.id}>
+            <div className="spread">
+              <h3 style={{ margin: 0 }}>
+                {t.anon_label}
+                <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>
+                  学生互评 {t.studentTotal === null ? '—' : t.studentTotal.toFixed(2)}
+                  {t.teacherTotal !== null ? ` · 教师 ${t.teacherTotal.toFixed(2)}` : ''}
+                </span>
+              </h3>
+              <span className="muted" style={{ fontSize: 13 }}>
+                已填 {filled}/{items.length}
+              </span>
+            </div>
+            <div className="grid" style={{ marginTop: 10 }}>
+              {items.map((it) => (
+                <div key={it.id} className="spread" style={{ gap: 10, padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div>{it.name}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {it.min_score}~{it.max_score}
+                      {it.weight ? ` · 权重 ${it.weight}` : ''}
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    min={it.min_score}
+                    max={it.max_score}
+                    value={row[it.id] ?? ''}
+                    placeholder="—"
+                    onChange={(e) => setVal(t.id, it.id, e.target.value)}
+                    style={{ width: 92, padding: '7px 10px', borderRadius: 10, border: '1px solid var(--line)', textAlign: 'right' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn btn-primary btn-sm" disabled={busy === t.id} onClick={() => save(t)}>
+                保存 {t.anon_label}
+              </button>
+              <button className="btn btn-sm" disabled={busy === t.id} onClick={() => save(t, true)}>
+                清空
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 }

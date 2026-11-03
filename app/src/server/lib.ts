@@ -16,6 +16,9 @@ export type Activity = {
   media_json: string;
   vote_multiple: number;
   vote_max_choices: number;
+  teacher_weight: number;
+  trim_low: number | null;
+  trim_high: number | null;
   version: number;
   created_at: number;
 };
