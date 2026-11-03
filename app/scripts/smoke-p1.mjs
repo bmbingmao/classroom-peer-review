@@ -405,6 +405,11 @@ console.log('\n[5] Excel 导出');
   ok('包含评语表', names.includes('评语表'), names);
   ok('包含积分表', names.includes('积分表'), names);
 
+  const trimmedSheet = wb.getWorksheet('去极值结果');
+  const headerVals = trimmedSheet.getRow(1).values.map((v) => String(v ?? ''));
+  ok('去极值结果带低值/高值剔除列', headerVals.some((h) => h.includes('低值剔除')) && headerVals.some((h) => h.includes('高值剔除')), headerVals);
+  ok('去极值结果带教师评分与合计列', headerVals.some((h) => h.includes('教师评分')) && headerVals.some((h) => h.includes('合计')), headerVals);
+
   const overview = wb.getWorksheet('活动概览');
   const text = overview.getSheetValues().flat().join(' ');
   ok('概览写明导出含真实姓名', text.includes('真实姓名'), text.slice(0, 200));
